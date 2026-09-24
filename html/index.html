@@ -1,0 +1,227 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>split-nmr-zip</title>
+    <style>
+      :root {
+        --bg: #f7f7f5;
+        --panel: #fff;
+        --ink: #23201d;
+        --muted: #6b6560;
+        --line: #e2ded9;
+        --accent: #8a5a2b;
+      }
+      body {
+        margin: 0;
+        padding: 24px 16px;
+        background: var(--bg);
+        color: var(--ink);
+        font:
+          14px/1.5 system-ui,
+          sans-serif;
+      }
+      main {
+        max-width: 960px;
+        margin: 0 auto;
+      }
+      h1 {
+        margin: 0 0 4px;
+        font-size: 20px;
+      }
+      p.sub {
+        margin: 0 0 20px;
+        color: var(--muted);
+      }
+      #drop {
+        border: 2px dashed var(--line);
+        border-radius: 10px;
+        background: var(--panel);
+        padding: 32px 20px;
+        text-align: center;
+        color: var(--muted);
+        cursor: pointer;
+      }
+      #drop.over {
+        border-color: var(--accent);
+      }
+      #status {
+        margin: 14px 0;
+        color: var(--muted);
+        min-height: 20px;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        overflow: hidden;
+      }
+      th,
+      td {
+        padding: 8px 12px;
+        text-align: left;
+        border-bottom: 1px solid var(--line);
+        font-variant-numeric: tabular-nums;
+      }
+      th {
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 0.03em;
+        color: var(--muted);
+        background: #f0ece7;
+      }
+      tr:last-child td {
+        border-bottom: 0;
+      }
+      button {
+        font: inherit;
+        padding: 3px 10px;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        background: var(--bg);
+        color: var(--accent);
+        cursor: pointer;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #1b1917;
+          --panel: #242120;
+          --ink: #eee9e4;
+          --muted: #a49b93;
+          --line: #3a3532;
+          --accent: #d79a63;
+        }
+        th {
+          background: #2e2a27;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>split-nmr-zip</h1>
+      <p class="sub">
+        Run <code>npm run build</code>, then serve the repository and open this
+        page from the server — a module cannot be imported over
+        <code>file://</code>. Drop an archive of NMR data: a Bruker folder, a
+        zip of per-experiment zips, or a single experiment.
+      </p>
+
+      <div id="drop">Drop a .zip here, or click to choose one</div>
+      <input id="file" type="file" accept=".zip" hidden />
+      <div id="status"></div>
+      <table id="out" hidden>
+        <thead>
+          <tr>
+            <th>expno</th>
+            <th>nucleus</th>
+            <th>frequency</th>
+            <th>solvent</th>
+            <th>pulse sequence</th>
+            <th>scans</th>
+            <th>size</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </main>
+
+    <script type="module">
+      import { splitNmrZip } from '../dist/split-nmr-zip.esm.js';
+
+      const drop = document.querySelector('#drop');
+      const input = document.querySelector('#file');
+      const status = document.querySelector('#status');
+      const table = document.querySelector('#out');
+      const body = table.querySelector('tbody');
+
+      async function handle(file) {
+        body.replaceChildren();
+        table.hidden = true;
+        status.textContent = `reading ${file.name}…`;
+        const start = performance.now();
+        let entries;
+        try {
+          entries = await splitNmrZip(file);
+        } catch (error) {
+          status.textContent = `failed: ${error.message}`;
+          return;
+        }
+        for (const { meta, zip } of entries) {
+          body.append(row(meta, zip, file.name));
+        }
+        table.hidden = entries.length === 0;
+        status.textContent = `${entries.length} experiment${
+          entries.length === 1 ? '' : 's'
+        } in ${Math.round(performance.now() - start)} ms`;
+      }
+
+      function row(meta, zip, sourceName) {
+        const cells = [
+          meta.experimentNumber ?? meta.name ?? '—',
+          `${meta.nucleus.join(', ')} · ${meta.dimension}D`,
+          meta.baseFrequency[0]
+            ? `${meta.baseFrequency[0].toFixed(2)} MHz`
+            : '—',
+          meta.solvent ?? '—',
+          meta.pulseSequence ?? '—',
+          meta.numberOfScans ?? '—',
+          `${Math.round(zip.byteLength / 1024)} KB`,
+        ].map((value) => {
+          const cell = document.createElement('td');
+          cell.textContent = value;
+          return cell;
+        });
+
+        const download = document.createElement('button');
+        download.textContent = 'download';
+        download.addEventListener('click', () => {
+          const base = sourceName.replace(/\.zip$/i, '');
+          const suffix =
+            meta.experimentNumber ?? meta.name.replaceAll('/', '_');
+          save(zip, `${base}_${suffix}.zip`);
+        });
+        const last = document.createElement('td');
+        last.append(download);
+
+        const tr = document.createElement('tr');
+        tr.append(...cells, last);
+        return tr;
+      }
+
+      function save(zip, filename) {
+        const url = URL.createObjectURL(
+          new Blob([zip], { type: 'application/zip' }),
+        );
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = filename;
+        link.click();
+        URL.revokeObjectURL(url);
+      }
+
+      drop.addEventListener('click', () => input.click());
+      input.addEventListener('change', () => {
+        if (input.files[0]) handle(input.files[0]);
+      });
+      for (const type of ['dragenter', 'dragover']) {
+        drop.addEventListener(type, (event) => {
+          event.preventDefault();
+          drop.classList.add('over');
+        });
+      }
+      for (const type of ['dragleave', 'drop']) {
+        drop.addEventListener(type, () => drop.classList.remove('over'));
+      }
+      drop.addEventListener('drop', (event) => {
+        event.preventDefault();
+        const file = event.dataTransfer.files[0];
+        if (file) handle(file);
+      });
+    </script>
+  </body>
+</html>
