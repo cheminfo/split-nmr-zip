@@ -1,19 +1,23 @@
 import { FifoLogger } from 'fifo-logger';
 import { FileCollection } from 'file-collection';
-import { expect, test } from 'vitest';
+import { beforeAll, expect, test } from 'vitest';
 
+import type { NmrZipEntry } from '../index.ts';
 import { splitNmrZip } from '../index.ts';
 
 import { SAMPLE, coffeeFiles, zipFiles } from './helpers/coffeeArchive.ts';
 
-const archive = await zipFiles(
-  await coffeeFiles(),
-  (path) => `${SAMPLE}/${path}`,
-);
+// Reading and re-zipping this sample costs a few seconds, and most of the
+// tests below only look at the result of the default call, so it is done once.
+let archive: Uint8Array;
+let entries: NmrZipEntry[];
 
-test('one entry per experiment, in expno order', async () => {
-  const entries = await splitNmrZip(archive);
+beforeAll(async () => {
+  archive = await zipFiles(await coffeeFiles(), (path) => `${SAMPLE}/${path}`);
+  entries = await splitNmrZip(archive);
+});
 
+test('one entry per experiment, in expno order', () => {
   expect(entries.map((entry) => entry.meta.experimentNumber)).toStrictEqual([
     10, 11, 12, 13, 99999,
   ]);
@@ -27,7 +31,6 @@ test('one entry per experiment, in expno order', async () => {
 });
 
 test('expno 98888 holds no data and is dropped', async () => {
-  const entries = await splitNmrZip(archive);
   const expnos = entries.map((entry) => entry.meta.experimentNumber);
 
   expect(expnos).not.toContain(98888);
@@ -42,9 +45,7 @@ test('expno 98888 holds no data and is dropped', async () => {
   ).toBe(true);
 });
 
-test('metadata of a 1D experiment', async () => {
-  const entries = await splitNmrZip(archive);
-
+test('metadata of a 1D experiment', () => {
   expect(entries[0]?.meta).toStrictEqual({
     name: `${SAMPLE}/10`,
     experimentNumber: 10,
@@ -65,8 +66,7 @@ test('metadata of a 1D experiment', async () => {
   });
 });
 
-test('metadata of a 2D experiment carries one value per dimension', async () => {
-  const entries = await splitNmrZip(archive);
+test('metadata of a 2D experiment carries one value per dimension', () => {
   const jres = entries.find((entry) => entry.meta.experimentNumber === 13);
 
   expect(jres?.meta.dimension).toBe(2);
@@ -79,7 +79,6 @@ test('metadata of a 2D experiment carries one value per dimension', async () => 
 });
 
 test('each entry is itself a readable single-experiment archive', async () => {
-  const entries = await splitNmrZip(archive);
   const first = entries[0];
 
   const again = await splitNmrZip(first?.zip as Uint8Array);
@@ -89,8 +88,6 @@ test('each entry is itself a readable single-experiment archive', async () => {
 });
 
 test('an entry holds only the files of its own experiment', async () => {
-  const entries = await splitNmrZip(archive);
-
   const files = await FileCollection.fromZip(entries[1]?.zip as Uint8Array);
   const paths = files.files.map((file) => file.relativePath);
 
