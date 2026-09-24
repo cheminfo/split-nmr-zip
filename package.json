@@ -1,6 +1,6 @@
 {
   "name": "split-nmr-zip",
-  "version": "0.0.0",
+  "version": "1.0.0",
   "description": "Split a zip of NMR data into one zip per experiment, with its acquisition metadata",
   "type": "module",
   "exports": {
